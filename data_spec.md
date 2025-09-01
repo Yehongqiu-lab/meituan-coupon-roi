@@ -54,10 +54,10 @@ In `user_coupon_receive.csv`: user history of coupons receipts, and coupon disco
 ## Data Compression/Type Declare:
 - reduce memory by re-declare data type.
 - re-align User_id, Coupon_id, Order_id, Shop_id across CSVs.
-- re-format date-related fields format.
+- re-format date-related fields.
 
 ## Imputation/Reconciliation (txn ↔ receipt): 
-Impute missing `Coupon_id` in `txn` with the info from `receipt`.
+Impute missing `txn.Coupon_id` with the info from `receipt`.
 
 - **Only** impute `Coupon_id` when **one and only one** same-user receipt matches:
     - `Receive_time ≤ Pay_date ≤ End_time`
@@ -71,17 +71,18 @@ Flags are retained only for diagnostic purposes (not used in training).
 - **`flag_no_coupon`**: mentioned above.
 - **`flag_ambiguous_txn`**: mentioned above.
 
-- **`flag_transfer_case`**: Coupon redemption recorded under a *different* user.  
-  - The redeemer did not receive the coupon before the transaction, **or**  
-  - The coupon was received but redeemed after its `End_time`.  
-
 - **`flag_untracked_coupon`**: Coupon redemption with **no valid prior receipt**.  
-  - Case 1: `txn.Coupon_id` missing → no candidate coupon found by reconciliation, but `Reduce_amount > 0`.  
-  - Case 2: `txn.Coupon_id` present in transaction but not found in receipt records.  
+    - `txn.Coupon_id` present in transaction but not found in any receipt records.  
 
-- **`flag_repeat_redemption`**: 
-    - **each receipt contributes to only one redemption:** if a (user_id, coupon_id) appears in multiple *receipts*, treated as **different** events, and each receipt event matches *at most* one txn and the matched txns must be **different**.
-    - **pick the earliest qualifying txn:** if a (user_id, coupon_id) appears in multiple *txns*, only the earliest qualifying txn can be considered the redemption used to create labels; later ones are flagged 1 in `flag_repeat_redemption`.
+- **`flag_invalid_coupon`**: Redemption of coupons counterfaits with what's recorded in receipts. 
+    - The coupons was received by a different user. The redeemer did not receive the coupon before the transaction, **or**  
+    - The coupon was received by the same user but redeemed after its `End_time`, **or**
+    - The coupon was redeemed by the same user multiple times (details below).
+
+    >   **repeat_redemption**: 
+        - each receipt contributes to only one redemption: if a (user_id, coupon_id) appears in multiple receipts, treated as different events, and each receipt event matches at most one txn and the matched txns must be different.
+
+        - pick the earliest qualifying txn: if a (user_id, coupon_id) appears in multiple txns, only the earliest qualifying txn can be considered the redemption used to create labels; later ones are flagged 1 in `flag_invalid_coupon`.
 
 - **`flag_pay_void`**:
     - `Actual_pay ≤ 0` in txns.
@@ -91,8 +92,10 @@ Flags are retained only for diagnostic purposes (not used in training).
 ### Receipt-Level Diagnostics 
 
 For each segment defined by `Price_limit_bin × Coupon_amt_bin × Expiry_span_bin`:  
-- Report: **% `flag_transfer_case`** = (# transfer_case) / (# receipts).  
-- **High-integrity cohort** = segments with low % `flag_transfer_case`.  
+- Report: 
+    - **% `flag_invalid_coupon`** = (# invalid_coupon) / (# receipts).  
+    - **redemption rate** = (# correctly_redeemed_coupon) / (# receipts).
+- **High-integrity cohort** = segments with low % `flag_invalid_coupon` and high redemption rate.  
 
 ### Transaction-Level Diagnostics  
 
@@ -101,20 +104,19 @@ Across all transactions, report the proportions of:
 - `flag_ambiguous_txn`  
 - `flag_no_coupon`  
 - `flag_untracked_coupon`
-- `flag_repeat_redemption`
 - `flag_pay_void`
 
 ## Supervised Learning Targets:
 Generate training labels from two perspectives: short-term and long-term.
 
-For each receipt,
+For each **receipt**,
 - **Short-term ROI:** `label_same_user_st` (primary label): 1 if **same user** redeems within `min(15d, End_time)`; else 0.
 - **Full-horizon ROI:** `label_same_user_fh`: if **same user** redeems within `End_time`.
 
 ## Leakage Guards:
 
 - All features must satisfy `feature_ts ≤ Receive_time`.
-- ML Workflow Data **Split key** = `Receive_time`.
+- Train/Val/Test **Split key** = `Receive_time`.
 - **Purge Period:** apply a 15-day gap before each Val/Test boundary so no Train label window crosses into future data.
 - Any population aggregates (e.g., redemption rate by coupon_type) must be computed within **feature lookback window only**.
 
