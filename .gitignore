@@ -30,6 +30,5 @@ Thumbs.db
 *.swp
 
 # project-specific
-data_raw/
-data_work/
+data_*/
 tests/

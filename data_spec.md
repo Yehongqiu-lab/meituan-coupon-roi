@@ -24,7 +24,7 @@ In `order_detail.csv`: transaction details of users; short as `txn`.
 | Actual_pay     | Actual transaction amount paid by user (Order original price − Subsidy)      |
 | Reduce_amount  | Subsidy amount                                                              |
 
-In `user_visit_detail.csv`: users' timestamps of log-ins
+In `user_visit_detail.csv`: users' timestamps of log-ins; short as `user_visit`.
 | Field Name     | Description                                                                 |
 |----------------|-----------------------------------------------------------------------------|
 | User_id        | Unique user ID after login                                                  |
@@ -37,9 +37,9 @@ In `user_coupon_receive.csv`: user history of coupons receipts, and coupon disco
 | Coupon_id      | Coupon ID                                                                   |
 | Coupon_status  | Coupon status (1 = Unused, 2 = Used, 3 = Other)                             |
 | Coupon_amt     | Coupon face value (unit: RMB yuan)                                          |
-| Receive_time   | Coupon receive time (format: yyyy-MM-dd)                                    |
-| Start_time     | Coupon effective start time (format: yyyy-MM-dd)                            |
-| End_time       | Coupon expiration time (format: yyyy-MM-dd)                                 |
+| Receive_date   | Coupon receive time (format: yyyy-MM-dd)                                    |
+| Start_date     | Coupon effective start time (format: yyyy-MM-dd)                            |
+| End_date       | Coupon expiration time (format: yyyy-MM-dd)                                 |
 | Price_limit    | Minimum spending threshold for coupon usage (unit: RMB yuan)                |
 
 ## Known quirks:
@@ -60,7 +60,7 @@ In `user_coupon_receive.csv`: user history of coupons receipts, and coupon disco
 Impute missing `txn.Coupon_id` with the info from `receipt`.
 
 - **Only** impute `Coupon_id` when **one and only one** same-user receipt matches:
-    - `Receive_time ≤ Pay_date ≤ End_time`
+    - `Receive_date ≤ Pay_date ≤ End_date`
 - If matched uniquely: set `coupon_id_imputed = 1`.
 - Else if none is matched and `Reduce_amount` is 0: set `flag_no_coupon = 1`.
 - Else: set `flag_ambiguous_txn = 1`
@@ -76,7 +76,7 @@ Flags are retained only for diagnostic purposes (not used in training).
 
 - **`flag_invalid_coupon`**: Redemption of coupons counterfaits with what's recorded in receipts. 
     - The coupons was received by a different user. The redeemer did not receive the coupon before the transaction, **or**  
-    - The coupon was received by the same user but redeemed after its `End_time`, **or**
+    - The coupon was received by the same user but redeemed after its `End_date`, **or**
     - The coupon was redeemed by the same user multiple times (details below).
 
     >   **repeat_redemption**: 
@@ -110,26 +110,26 @@ Across all transactions, report the proportions of:
 Generate training labels from two perspectives: short-term and long-term.
 
 For each **receipt**,
-- **Short-term ROI:** `label_same_user_st` (primary label): 1 if **same user** redeems within `min(15d, End_time)`; else 0.
-- **Full-horizon ROI:** `label_same_user_fh`: if **same user** redeems within `End_time`.
+- **Short-term ROI:** `label_same_user_st` (primary label): 1 if **same user** redeems within `min(15d, End_date)`; else 0.
+- **Full-horizon ROI:** `label_same_user_fh`: if **same user** redeems within `End_date`.
 
 ## Leakage Guards:
 
-- All features must satisfy `feature_ts ≤ Receive_time`.
-- Train/Val/Test **Split key** = `Receive_time`.
+- All features must satisfy `feature_ts ≤ Receive_date`.
+- Train/Val/Test **Split key** = `Receive_date`.
 - **Purge Period:** apply a 15-day gap before each Val/Test boundary so no Train label window crosses into future data.
 - Any population aggregates (e.g., redemption rate by coupon_type) must be computed within **feature lookback window only**.
 
 ## Edge Cases/Drop Rules:
 
 - Duplicate rows in any CSV.
-- Receipts with `Start_time` after `End_time`.
-- Receipts with missing `Start_time/End_time`.
+- Receipts with `Start_date` after `End_date`.
+- Receipts with missing `Start_date/End_date`.
 
 # Processed Dataset:
 
 ## Entities:
-Row = one coupon receipt event for a (User_id, Coupon_id, Receive_time).
+Row = one coupon receipt event for a (User_id, Coupon_id, Receive_date).
 
 ## Label:
 
@@ -139,7 +139,7 @@ Choose one of the following labels aligning to the product design:
 
 ## Split:
 
-- **Split key:** `Receive_time` of coupons
+- **Split key:** `Receive_date` of coupons
 - **Split integrity:** Leave a 15-day purge before Test:  
     - Train: 2023-01-01 … 2023-05-16 (4.5 months).
     - Test:  2023-06-01 … 2023-06-30 (1 month).
@@ -151,7 +151,7 @@ Choose one of the following labels aligning to the product design:
 ## Features:
 
 - **User-centric features:**
-    - **As-of features only:** features timestamp `≤ Receive_time`.
+    - **As-of features only:** features timestamp `≤ Receive_date`.
     - **Per-fold fitting:** scalers/encoders/samplers fit on the Train-fold only.
     - **Examples:** user behavior(feature lookback window: 7/30/90d)
 - **Coupon-centric features:**

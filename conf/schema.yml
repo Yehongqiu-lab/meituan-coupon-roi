@@ -1,0 +1,17 @@
+# conf/schema.yml
+# Stub schema file — not enforced in v1.0.
+# Purpose: document data sources and learn the convention.
+# Can be expanded later with dtypes, keys, constraints.
+
+tables:
+  - name: txn
+    path: data_raw/order_detail.csv
+    note: "Transaction details: User_id, Shop_id, Order_id, Coupon_id, etc."
+
+  - name: user_visit
+    path: data_raw/user_visit_detail.csv
+    note: "User login timestamps."
+
+  - name: receipt
+    path: data_raw/user_coupon_receive.csv
+    note: "Coupon receipts with status, amount, validity window."
