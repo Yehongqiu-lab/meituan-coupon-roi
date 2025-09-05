@@ -48,6 +48,7 @@ In `user_coupon_receive.csv`: user history of coupons receipts, and coupon disco
 - **Transactions without Coupon_id:** Two cases — (1) coupon used but missed, inferred via the **Reconciliation rules** introduced below; (2) no coupon applied.
 - **Repeated Coupon Use** A user shows multiple transactions with the same Coupon_id despite a one-time receiving record.
 - **Repeated Coupon Receipt:** A user receives a same Coupon_id on different days.
+- **Actual benefit differs from what's stated:** When a coupon is actually redeemed, the actual benefit/reduced amount might be different from what's stated in receipt. It differs based on situations.
 
 # Intermediate Data Processing:
 
@@ -60,7 +61,7 @@ In `user_coupon_receive.csv`: user history of coupons receipts, and coupon disco
 Impute missing `txn.Coupon_id` with the info from `receipt`.
 
 - **Only** impute `Coupon_id` when **one and only one** same-user receipt matches:
-    - `Receive_date ≤ Pay_date ≤ End_date`
+    - `max(Receive_date, Start_date) ≤ Pay_date ≤ End_date`
 - If matched uniquely: set `coupon_id_imputed = 1`.
 - Else if none is matched and `Reduce_amount` is 0: set `flag_no_coupon = 1`.
 - Else: set `flag_ambiguous_txn = 1`
@@ -76,7 +77,9 @@ Flags are retained only for diagnostic purposes (not used in training).
 
 - **`flag_invalid_coupon`**: Redemption of coupons counterfaits with what's recorded in receipts. 
     - The coupons was received by a different user. The redeemer did not receive the coupon before the transaction, **or**  
-    - The coupon was received by the same user but redeemed after its `End_date`, **or**
+    - The coupon was received by the same user but its `Start_date`, `Receive_date`, or `End_date` is missing, or: 
+        `Start_date > End_date` **or**
+    - The coupon was received by the same user but redeemed before its `Start_date`, **or** after its `End_date`, **or**
     - The coupon was redeemed by the same user multiple times (details below).
 
     >   **repeat_redemption**: 
@@ -123,8 +126,6 @@ For each **receipt**,
 ## Edge Cases/Drop Rules:
 
 - Duplicate rows in any CSV.
-- Receipts with `Start_date` after `End_date`.
-- Receipts with missing `Start_date/End_date`.
 
 # Processed Dataset:
 

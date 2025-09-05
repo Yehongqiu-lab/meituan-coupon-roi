@@ -31,4 +31,6 @@ Thumbs.db
 
 # project-specific
 data_*/
-tests/
+
+# test
+*.ini
