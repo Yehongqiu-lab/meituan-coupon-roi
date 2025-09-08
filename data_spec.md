@@ -69,27 +69,26 @@ Impute missing `txn.Coupon_id` with the info from `receipt`.
 ## Diagnostic Flags  
 Flags are retained only for diagnostic purposes (not used in training). 
 
-- **`flag_no_coupon`**: mentioned above.
-- **`flag_ambiguous_txn`**: mentioned above.
+### The following flags are labeled within the `txn` table:
+
+- Flags ONLY for txns with missing Coupon_id in raw data:
+    - **`flag_no_coupon`**: mentioned above.
+    - **`flag_ambiguous_txn`**: mentioned above.
 
 - **`flag_untracked_coupon`**: Coupon redemption with **no valid prior receipt**.  
-    - `txn.Coupon_id` present in transaction but not found in any receipt records.  
-
-- **`flag_invalid_coupon`**: Redemption of coupons counterfaits with what's recorded in receipts. 
-    - The coupons was received by a different user. The redeemer did not receive the coupon before the transaction, **or**  
-    - The coupon was received by the same user but its `Start_date`, `Receive_date`, or `End_date` is missing, or: 
-        `Start_date > End_date` **or**
-    - The coupon was received by the same user but redeemed before its `Start_date`, **or** after its `End_date`, **or**
-    - The coupon was redeemed by the same user multiple times (details below).
-
-    >   **repeat_redemption**: 
-        - each receipt contributes to only one redemption: if a (user_id, coupon_id) appears in multiple receipts, treated as different events, and each receipt event matches at most one txn and the matched txns must be different.
-
-        - pick the earliest qualifying txn: if a (user_id, coupon_id) appears in multiple txns, only the earliest qualifying txn can be considered the redemption used to create labels; later ones are flagged 1 in `flag_invalid_coupon`.
+    - `txn.Coupon_id` present in transaction but not found in any receipt records. 
 
 - **`flag_pay_void`**:
-    - `Actual_pay ≤ 0` in txns.
+    - `Actual_pay ≤ 0` in txns. 
 
+### The following flag(s) labeled within the `receipt` table:
+
+- **`flag_invalid_coupon`**: The Coupon receipt either has missing info, or counterfaits with what's recorded in txns. 
+    - *Structrual Issue:* The coupon was received by the same user but its `Start_date`, `Receive_date`, or `End_date` is missing, or `Start_date > End_date`.
+    - *Semantic Issue:*
+        - The coupon was redeemed by a different user. The redeemer did not receive the coupon within its valid usage window, **or**
+        - The coupon was received by the same user but redeemed before its `Start_date`, or after its `End_date`.
+    
 ## Data Quality / Integrity Metrics  
 
 ### Receipt-Level Diagnostics 
@@ -97,17 +96,22 @@ Flags are retained only for diagnostic purposes (not used in training).
 For each segment defined by `Price_limit_bin × Coupon_amt_bin × Expiry_span_bin`:  
 - Report: 
     - **% `flag_invalid_coupon`** = (# invalid_coupon) / (# receipts).  
-    - **redemption rate** = (# correctly_redeemed_coupon) / (# receipts).
-- **High-integrity cohort** = segments with low % `flag_invalid_coupon` and high redemption rate.  
+    - **redemption rate** = (# validly_redeemed_coupon) / (# receipts).
+    - **repeatedly redeemed rate** = (# repeatedly_redeemed_coupon) / (# receipts)
+- **High-integrity cohort** = segments with low % `flag_invalid_coupon`, high redemption rate, and low repeatedly redeemed rate. 
+
+>   Note: **repeat_redemption**: 
+        - each receipt contributes to only one redemption: if a (user_id, coupon_id) appears in multiple receipts, treated as different events, and each receipt event matches at most one txn in which the Pay_date covers the valid usage window.
+
+        - pick the earliest qualifying txn: if a (user_id, coupon_id) appears in multiple txns, only the earliest qualifying txn can be considered the redemption used to create labels; later ones are not.
 
 ### Transaction-Level Diagnostics  
 
 Across all transactions, report the proportions of:  
-- `coupon_id_imputed = 1`  
-- `flag_ambiguous_txn`  
-- `flag_no_coupon`  
-- `flag_untracked_coupon`
-- `flag_pay_void`
+- `coupon_id_imputed = 1`, `flag_ambiguous_txn`, and `flag_no_coupon` in txns with Coupon_id oringinally missing.
+- txns with missing Coupon_id in the raw data.  
+- `flag_untracked_coupon`.
+- `flag_pay_void`.
 
 ## Supervised Learning Targets:
 Generate training labels from two perspectives: short-term and long-term.

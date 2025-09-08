@@ -34,3 +34,4 @@ data_*/
 
 # test
 *.ini
+.pytest_cache

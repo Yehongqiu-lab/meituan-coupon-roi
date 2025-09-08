@@ -39,6 +39,12 @@ def impute_missing_coupon_ids(txns_df, receipts_df):
     # apply decisions back to txns_df
     txns_df = _apply_decisions(txns_df, decisions_df, txn_pre_ambig)
 
+    # If there are more txns with missing Coupon_id_code and all flags are zero:
+    # label them as ambiguous txns
+    mask = (txns_df["Coupon_id_code"] == -1) & (txns_df["coupon_id_imputed"] == 0) \
+            & (txns_df["flag_ambiguous_txn"] == 0) & (txns_df["flag_no_coupon"] == 0)
+    txns_df.loc[mask, "flag_ambiguous_txn"] = 1
+
     return txns_df
 
 #################################################################################################

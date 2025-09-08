@@ -1,6 +1,9 @@
 # tests/conftest.py
 import pytest
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+from pathlib import Path
 
 @pytest.fixture
 def make_txn():
@@ -20,7 +23,7 @@ def make_txn():
     return _make_txn
 
 @pytest.fixture
-def make_txns():
+def make_txns(make_txn):
     def _make_txns(*rows):
         return pd.concat([make_txn(*row) for row in rows], ignore_index=True)
     return _make_txns
@@ -42,8 +45,61 @@ def make_receipt():
     return _make_receipt
 
 @pytest.fixture
-def make_receipts():
+def make_receipts(make_receipt):
     def _make_receipts(*rows):
         return pd.concat([make_receipt(*row) for row in rows], ignore_index=True)
     return _make_receipts
+
+@pytest.fixture
+def add_txn_key():
+    def _add_txn_key(txn_df, key=1):
+        txn_df = txn_df.assign(txn_key = key)
+        return txn_df
+    return _add_txn_key
+
+@pytest.fixture
+def add_txn_keys():
+    def _add_txn_keys(txns_df, keys):
+        txns_df = txns_df.assign(txn_key = keys)
+        return txns_df
+    return _add_txn_keys
+
+@pytest.fixture
+def add_receipt_key():
+    def _add_receipt_key(receipt_df, key=1):
+        receipt_df = receipt_df.assign(receipt_key = key)
+        return receipt_df
+    return _add_receipt_key
+
+@pytest.fixture
+def add_receipt_keys():
+    def _add_receipt_keys(receipts_df, keys):
+        receipts_df = receipts_df.assign(receipt_key = keys)
+        return receipts_df
+    return _add_receipt_keys
+
+@pytest.fixture
+def cast_datatype():
+    def _cast_datetype(df, flag):
+        if flag == "txn":
+            to_Int_cols = ["User_id_code", "Shop_id_code", 
+                              "Coupon_id_code",
+                              "Order_id_code", "Coupon_type",
+                              "Actual_pay_cent", "Reduce_amount_cent"]
+        elif flag == "receipt":
+            to_Int_cols = ["User_id_code", "Coupon_id_code",
+                           "Coupon_amt_cent", "Price_limit_cent",
+                           "Coupon_status"]
+        for col in to_Int_cols:
+            df[col] = df[col].astype("Int64")
+        return df
+    return _cast_datetype
+
+@pytest.fixture
+def to_parquet():
+    def _to_parquet(df, path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        pq.write_table(table, path)
+    return _to_parquet
 
