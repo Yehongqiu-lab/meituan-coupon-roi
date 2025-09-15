@@ -11,6 +11,7 @@ def test_happy_path_full_and_short_labels(make_txn, make_receipt,
     Expect:
     label_same_user_fh = 1
     label_same_user_st = 1
+    label_valid = 1
     """
     # Given: one txn with Coupon_id_code present, positive pay, positive reduce
     txn = make_txn(
@@ -57,8 +58,8 @@ def test_happy_path_full_and_short_labels(make_txn, make_receipt,
     assert len(out) == 1
     row = out.iloc[0]
     assert row["receipt_key"] == 11
-    assert row["User_id"] == 1
-    assert row["Coupon_id"] == 9001
+    assert row["User_id_code"] == 1
+    assert row["Coupon_id_code"] == 9001
 
     # Dates and effective windows:
     assert pd.Timestamp(row["Receive_date"]) == pd.Timestamp("2023-01-05")
@@ -71,6 +72,7 @@ def test_happy_path_full_and_short_labels(make_txn, make_receipt,
     # Labels:
     assert row["label_same_user_fh"] == 1
     assert row["label_same_user_st"] == 1
+    assert row["label_valid"] == 1
 
     # Additional fields passthrough:
     assert row["Coupon_status"] == 1
@@ -85,8 +87,14 @@ def test_happy_path_full_and_short_labels(make_txn, make_receipt,
     assert row["same_user_valid_txn_count"] == 1
     assert row["same_user_early_txn_count"] == 0
     assert row["same_user_late_txn_count"] == 0
-    assert row["other_user_in_window_count"] == 0
-    assert row["other_user_without_own_receipt_count"] == 0
+    assert row["other_user_in_window_txn_count"] == 0
+    assert row["other_user_without_own_receipt_txn_count"] == 0
+
+    # Usage validity flags:
+    assert row["flag_early"] == 0
+    assert row["flag_late"] == 0
+    assert row["flag_cross_user"] == 0
+    assert row["flag_struc_invalid"] == 0
 
 # ----------------------------
 # Case 1.2
@@ -116,6 +124,7 @@ def test_happy_path_long_window_short_term_zero(make_txn, make_receipt,
 
     assert row["label_same_user_fh"] == 1
     assert row["label_same_user_st"] == 0
+    assert row["label_valid"] == 1
     assert row["first_valid_txn_key"] == 2
 
 # ----------------------------
@@ -144,6 +153,7 @@ def test_inclusivity_edges(make_txn, make_receipt,
     row = pq.read_table(outp).to_pandas().iloc[0]
     assert row["label_same_user_fh"] == 1
     assert row["label_same_user_st"] == 1
+    assert row["label_valid"] == 1
     assert row["first_valid_txn_key"] == 70
 
 # ----------------------------
@@ -175,6 +185,11 @@ def test_early_late_counts(make_txns, make_receipt,
     row = pq.read_table(outp).to_pandas().iloc[0]
     assert row["label_same_user_fh"] == 0
     assert row["label_same_user_st"] == 0
+    assert row["label_valid"] == 0
+
+    assert row["flag_early"] == 1
+    assert row["flag_late"] == 1
+
     assert row["same_user_early_txn_count"] == 1
     assert row["same_user_late_txn_count"] == 1
     assert row["same_user_valid_txn_count"] == 0
@@ -205,6 +220,8 @@ def test_null_dates_label_zero(make_txn, make_receipt,
     row = pq.read_table(outp).to_pandas().iloc[0]
     assert row["label_same_user_fh"] == 0
     assert row["label_same_user_st"] == 0
+    assert row["label_valid"] == 0
+    assert row["flag_struc_invalid"] == 1
     assert row["same_user_valid_txn_count"] == 0
     assert pd.isna(row["first_valid_txn_key"])
     assert pd.isna(row["first_valid_txn_time"])
@@ -237,6 +254,7 @@ def test_multiple_same_user_valid_txns(make_txns, make_receipt,
     row = pq.read_table(outp).to_pandas().iloc[0]
     assert row["label_same_user_fh"] == 1
     assert row["label_same_user_st"] == 1
+    assert row["label_valid"] == 1
     assert row["same_user_valid_txn_count"] == 3
     assert row["first_valid_txn_key"] == 41
     assert pd.Timestamp(row["first_valid_txn_time"]) == pd.Timestamp("2023-02-02")
@@ -270,6 +288,7 @@ def test_two_receipts_one_txn_same_first_valid(make_txn, make_receipts,
     assert set(out["receipt_key"]) == {52, 53}
     assert out["label_same_user_fh"].tolist() == [1, 1]
     assert out["label_same_user_st"].tolist() == [1, 1]
+    assert out["label_valid"].tolist() == [1, 1]
     assert out["first_valid_txn_key"].tolist() == [51, 51]
 
 # ----------------------------
@@ -302,6 +321,8 @@ def test_two_receipts_two_txns_match_respectively(make_txns, make_receipts,
     assert list(out["receipt_key"]) == [63, 64]
     assert out["label_same_user_st"].tolist() == [1, 1]
     assert out["label_same_user_fh"].tolist() == [1, 1]
+    assert out["label_valid"].tolist() == [1, 1]
+    assert out["flag_early"].tolist() == [0, 0]
     assert out["first_valid_txn_key"].tolist() == [61, 62]
 
 # ----------------------------
@@ -316,7 +337,7 @@ def test_cross_user_no_own_receipt(make_txn, make_receipt,
                    pay_amt_cent=2800, reduce_amt_cent=280)
     txn = add_txn_key(txn, key=201)
     txn = cast_datatype(txn, flag="txn")
-    tp = "tests/data_test/txn_7_1.parquet"; 
+    tp = "tests/data_test/txn_7_1.parquet"
     to_parquet(txn, tp)
 
     owner = make_receipt(user=101, coupon=9111, coupon_amt_cent=280,
@@ -331,8 +352,10 @@ def test_cross_user_no_own_receipt(make_txn, make_receipt,
     row = pq.read_table(outp).to_pandas().iloc[0]
     assert row["label_same_user_fh"] == 0
     assert row["label_same_user_st"] == 0
-    assert row["other_user_in_window_count"] == 1
-    assert row["other_user_without_own_receipt_count"] == 1
+    assert row["label_valid"] == 0
+    assert row["other_user_in_window_txn_count"] == 1
+    assert row["other_user_without_own_receipt_txn_count"] == 1
+    assert row["flag_cross_user"] == 1
 
 # ----------------------------
 # Case 7.2
@@ -370,8 +393,10 @@ def test_cross_user_has_own_receipt(make_txn, make_receipt,
     owner_row = pq.read_table(outp).to_pandas().query("receipt_key == 3021").iloc[0]
     assert owner_row["label_same_user_fh"] == 0
     assert owner_row["label_same_user_st"] == 0
-    assert owner_row["other_user_in_window_count"] == 1
-    assert owner_row["other_user_without_own_receipt_count"] == 0
+    assert owner_row["label_valid"] == 1
+    assert owner_row["other_user_in_window_txn_count"] == 1
+    assert owner_row["other_user_without_own_receipt_txn_count"] == 0
+    assert owner_row["flag_cross_user"] == 0
 
 
 

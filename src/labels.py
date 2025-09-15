@@ -6,18 +6,17 @@ from pathlib import Path
 ### notes on the txn.parquet and receipt.parquet:
 ### txn: 
     # added txn_key, Coupon_id_code reasonablely imputed, still-missing Coupon_id excluded,
-    # sorted by Pay_date and txn_key.
-    # (although not used here) flags.
+    # masks: coupon_id_imputed, flag_no_coupon, flag_ambiguous_txn.
     # no dup in rows
 ### receipt:
     # added receipt_key, 
-    # sorted by Receive_date and receipt_key.
     # no dup in rows
 
 def build_labels(
     receipts_parquet: Path,
     txns_parquet: Path,
-    out_parquet: Path,
+    out_parquet: Path,          # out_parquet's name should reflect the reconcile's strictness mode: strict(1) or relax(0).
+    reconcile_strict: bool = 0, # 1: not allowing txns with an imputed coupon_id; 0: allowed.
     short_days: int = 15,
     threads: int = 8,
 ) -> None:
@@ -26,7 +25,7 @@ def build_labels(
 
     - label_same_user_fh: same-user redemption within [start_eff, end_eff]
     - label_same_user_st: same-user redemption within [start_eff, min(end_eff, Receive_date + short_days)]
-    
+    - label_valid:        no early / late / cross-user redemption c.d.t the valid fh usage window
     - first_valid_txn_key / _time (earliest valid txn in full horizon)
     - same_user_valid_txn_count / early / late
     - other_user_in_window_count
@@ -37,7 +36,7 @@ def build_labels(
     Assumptions (first line includes all needed fields for this script):
     - Parquets contain: receipts: (receipt_key, User_id_code, Coupon_id_code, Receive_date, Start_date, End_date,
                             Coupon_status, Coupon_amt_cent, Price_limit_cent)
-                          txns:     (txn_key, User_id_code, Coupon_id_code, Pay_date,
+                          txns:     (txn_key, User_id_code, Coupon_id_code, Pay_date, coupon_id_imputed,
                           Shop_id_code, Order_id_code, Coupon_type, Biz_code, Actual_pay_cent, Reduce_amount_cent)
     - Inclusive time windows (BETWEEN) per data_spec.
     """
@@ -72,15 +71,23 @@ def build_labels(
 
     # table: txns
     con.execute("""
-        CREATE OR REPLACE TABLE txns AS
-        SELECT
-            CAST(txn_key    AS BIGINT)      AS txn_key,
-            CAST(User_id_code    AS BIGINT) AS t_user,
-            CAST(Coupon_id_code  AS BIGINT) AS t_coupon,
-            CAST(Pay_date   AS TIMESTAMP)   AS Pay_date
-        FROM read_parquet(?)
-    """, [str(txns_parquet)])
-
+            CREATE OR REPLACE TABLE txns AS
+            SELECT
+                CAST(txn_key    AS BIGINT)      AS txn_key,
+                CAST(User_id_code    AS BIGINT) AS t_user,
+                CAST(Coupon_id_code  AS BIGINT) AS t_coupon,
+                CAST(Pay_date   AS TIMESTAMP)   AS Pay_date
+            FROM read_parquet(?)
+        """, [str(txns_parquet)])
+    
+    if reconcile_strict:
+        con.execute("""
+            CREATE OR REPLACE TABLE txns AS
+            SELECT * FROM txns
+            WHERE coupon_id_imputed = 0
+        """, [str(txns_parquet)])
+        
+    
     # ===========================================
     # SECTION 2: Effective windows per receipt
     # ===========================================
@@ -92,7 +99,7 @@ def build_labels(
             receipt_key, r_user, r_coupon, Receive_date, Start_date, End_date,
             CASE WHEN Start_date IS NULL OR Receive_date IS NULL
                  THEN NULL
-                 ELSE greatest(Receive_date, Start_date)
+                 ELSE GREATEST(Receive_date, Start_date)
             END AS start_eff,
             End_date AS end_eff,
             CASE
@@ -156,12 +163,22 @@ def build_labels(
           SELECT receipt_key, COUNT(*) AS same_user_valid_txn_count
           FROM cand_fh GROUP BY receipt_key
         ),
-        early AS (
-          SELECT r.receipt_key, COUNT(*) AS same_user_early_txn_count
+        early_1 AS (
+          SELECT r.receipt_key, COUNT(*) AS same_user_early_txn_count_1
           FROM r
           JOIN txns t ON t.t_user=r.r_user AND t.t_coupon=r.r_coupon
-          WHERE r.start_eff IS NOT NULL AND t.Pay_date < r.start_eff
+          WHERE r.Start_date IS NOT NULL AND t.Pay_date < r.Start_date
           GROUP BY r.receipt_key
+        ),
+        early_2 AS (
+          SELECT r.receipt_key, COUNT(*) AS same_user_early_txn_count_2
+          FROM r
+          JOIN txns t 
+                ON t.t_user=r.r_user AND t.t_coupon=r.r_coupon
+                AND r.Start_date IS NOT NULL AND r.end_eff IS NOT NULL AND r.Receive_date IS NOT NULL
+                AND t.Pay_date BETWEEN r.Start_date AND r.end_eff
+          GROUP BY r.receipt_key
+          HAVING MAX(t.Pay_date) < r.Receive_date  
         ),
         late AS (
           SELECT r.receipt_key, COUNT(*) AS same_user_late_txn_count
@@ -171,22 +188,24 @@ def build_labels(
           GROUP BY r.receipt_key
         ),
         otheru AS (
-          SELECT r.receipt_key, COUNT(*) AS other_user_in_window_count
+          SELECT r.receipt_key, COUNT(*) AS other_user_in_window_txn_count
           FROM r
           JOIN txns t ON t.t_coupon = r.r_coupon
-                      AND t.t_user <> r.r_user
+                      AND t.t_user <> r.r_user 
                       AND r.start_eff IS NOT NULL AND r.end_eff IS NOT NULL
                       AND t.Pay_date BETWEEN r.start_eff AND r.end_eff
           GROUP BY r.receipt_key
         )
         SELECT r.receipt_key,
                COALESCE(inwin.same_user_valid_txn_count, 0) AS same_user_valid_txn_count,
-               COALESCE(early.same_user_early_txn_count, 0) AS same_user_early_txn_count,
+               COALESCE(early_1.same_user_early_txn_count_1, 0) AS same_user_early_txn_count_1,
+               COALESCE(early_2.same_user_early_txn_count_2, 0) AS same_user_early_txn_count_2,
                COALESCE(late.same_user_late_txn_count,  0)  AS same_user_late_txn_count,
-               COALESCE(otheru.other_user_in_window_count,0) AS other_user_in_window_count
+               COALESCE(otheru.other_user_in_window_txn_count,0) AS other_user_in_window_txn_count
         FROM r
         LEFT JOIN inwin  USING(receipt_key)
-        LEFT JOIN early  USING(receipt_key)
+        LEFT JOIN early_1 USING(receipt_key)
+        LEFT JOIN early_2 USING(receipt_key)
         LEFT JOIN late   USING(receipt_key)
         LEFT JOIN otheru USING(receipt_key)
     """)
@@ -226,28 +245,29 @@ def build_labels(
                 WHERE r2.receipt_key IS NULL
                 """)
     
-    # table: other_user_wo_own_receipt_counts
+    # table: other_user_wo_own_receipt_txn_counts
     con.execute("""
                 CREATE OR REPLACE TABLE other_user_wo_own_receipt_counts AS
                 SELECT
                     receipt_key,
-                    COUNT(DISTINCT txn_key) AS other_user_without_own_receipt_count
+                    COUNT(DISTINCT txn_key) AS other_user_without_own_receipt_txn_count
                 FROM other_user_wo_own_receipt
                 GROUP BY receipt_key
                 """)
     
 
-    # =====================================
+    # ==========================================
     # SECTION 7: Final labels (fh, st)
-    # =====================================
+    # Also generate the flags related to invalid redemption
+    # ==========================================
 
     # table: labels
     con.execute("""
         CREATE OR REPLACE TABLE labels AS
         SELECT
             r.receipt_key,
-            r.r_user        AS User_id,
-            r.r_coupon      AS Coupon_id,
+            r.r_user        AS User_id_code,
+            r.r_coupon      AS Coupon_id_code,
             r.Receive_date, r.Start_date, r.End_date,
             r.start_eff, r.end_eff, r.short_end,
             CASE WHEN EXISTS (SELECT 1 FROM cand_fh WHERE cand_fh.receipt_key = r.receipt_key)
@@ -257,12 +277,43 @@ def build_labels(
         FROM r
     """)
 
-    # ===================================================
-    # SECTION 8: Merge audits into final labels_out
-    # ===================================================
-
+    # generate flag_early and flag_late
     con.execute("""
-        CREATE OR REPLACE TABLE labels_out AS
+        CREATE OR REPLACE TABLE flags_early_late_redeem AS
+                SELECT
+                    A.receipt_key,
+                    A.same_user_valid_txn_count,
+                    A.same_user_early_txn_count_1,
+                    A.same_user_early_txn_count_2,
+                    (A.same_user_early_txn_count_1 + A.same_user_early_txn_count_2) AS same_user_early_txn_count,
+                    A.same_user_late_txn_count,
+                    A.other_user_in_window_txn_count,
+                    COALESCE(W.other_user_without_own_receipt_txn_count, 0) AS other_user_without_own_receipt_txn_count,
+                    CASE WHEN A.same_user_early_txn_count_1 + A.same_user_early_txn_count_2 > 0
+                        THEN 1 ELSE 0 END AS flag_early,
+                    CASE WHEN A.same_user_late_txn_count > 0
+                        THEN 1 ELSE 0 END AS flag_late,
+                FROM audit_counts A
+                LEFT JOIN other_user_wo_own_receipt_counts W USING (receipt_key)
+    """)
+
+    # generate flag_cross_user
+    con.execute("""
+        CREATE OR REPLACE TABLE flags_redeem_2 AS
+                SELECT
+                    f.*,
+                    CASE WHEN f.other_user_without_own_receipt_txn_count > 0
+                        THEN 1 ELSE 0 END AS flag_cross_user
+                FROM flags_early_late_redeem f
+    """)
+
+    # ==============================================================
+    # SECTION 8: Merge labels, audits, flags into final labels_out
+    # ==============================================================
+
+    # generate flag_struc_invalid
+    con.execute("""
+        CREATE OR REPLACE TABLE labels_out_it AS
         SELECT
           L.*,
           M.Coupon_status,
@@ -270,16 +321,36 @@ def build_labels(
           M.Price_limit_cent,
           F.first_valid_txn_key,
           F.first_valid_txn_time,
-          A.same_user_valid_txn_count,
-          A.same_user_early_txn_count,
-          A.same_user_late_txn_count,
-          A.other_user_in_window_count,
-          COALESCE(W.other_user_without_own_receipt_count, 0) AS other_user_without_own_receipt_count
+          FR.same_user_valid_txn_count,
+          FR.same_user_early_txn_count,
+          FR.same_user_late_txn_count,
+          FR.other_user_in_window_txn_count,
+          FR.other_user_without_own_receipt_txn_count, 
+          FR.flag_early,
+          FR.flag_late,
+          FR.flag_cross_user,
+          CASE WHEN ((L.User_id_code IS NULL OR L.User_id_code = -1) OR
+                     (L.Coupon_id_code IS NULL OR  L.Coupon_id_code = -1) OR
+                     L.Start_date IS NULL OR L.Receive_date IS NULL OR 
+                     L.End_date IS NULL OR L.Start_date > L.End_date)
+                THEN 1 ELSE 0 END AS flag_struc_invalid
         FROM labels L
         LEFT JOIN receipts_ad_fields M USING (receipt_key)
         LEFT JOIN first_valid F USING (receipt_key)
-        LEFT JOIN audit_counts A USING (receipt_key)
-        LEFT JOIN other_user_wo_own_receipt_counts W USING (receipt_key)
+        LEFT JOIN flags_redeem_2 FR USING (receipt_key)
+    """)
+
+    # generate label_valid
+    con.execute("""
+        CREATE OR REPLACE TABLE labels_out AS
+                SELECT 
+                    L.*,
+                    CASE WHEN COALESCE(L.flag_early, 0) <> 0
+                            OR COALESCE(L.flag_late, 0)  <> 0
+                            OR COALESCE(L.flag_cross_user, 0) <> 0
+                            OR COALESCE(L.flag_struc_invalid, 0) <> 0
+                    THEN 0 ELSE 1 END AS label_valid
+                FROM labels_out_it L
     """)
 
     # ==========================================

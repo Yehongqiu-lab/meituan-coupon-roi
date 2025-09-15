@@ -4,7 +4,9 @@
 import pandas as pd
 
 # public
-def impute_missing_coupon_ids(txns_df, receipts_df):
+def impute_missing_coupon_ids(txns_df, receipts_df, 
+                              txns_out_pq="data_work/txn_reconciled.parquet",
+                              receipts_out_pq="data_work/receipt_keyadded.parquet"):
     """
     Step-1 reconciliation: for txns with missing Coupon_id,
     impute when exactly one same-user receipt is valid at Pay_date.
@@ -44,6 +46,18 @@ def impute_missing_coupon_ids(txns_df, receipts_df):
     mask = (txns_df["Coupon_id_code"] == -1) & (txns_df["coupon_id_imputed"] == 0) \
             & (txns_df["flag_ambiguous_txn"] == 0) & (txns_df["flag_no_coupon"] == 0)
     txns_df.loc[mask, "flag_ambiguous_txn"] = 1
+
+    # save the txns_df to parquet:
+    txns_df.to_parquet(txns_out_pq, 
+                       index=False, 
+                       engine="pyarrow",
+                        compression="snappy")
+    
+    # save the receipts_df to parquet:
+    receipts_df.to_parquet(receipts_out_pq, 
+                       index=False, 
+                       engine="pyarrow",
+                        compression="snappy")
 
     return txns_df
 

@@ -76,18 +76,27 @@ Flags are retained only for diagnostic purposes (not used in training).
     - **`flag_ambiguous_txn`**: mentioned above.
 
 - **`flag_untracked_coupon`**: Coupon redemption with **no valid prior receipt**.  
-    - `txn.Coupon_id` present in transaction but not found in any receipt records. 
+    - `txn.Coupon_id` present in transaction but not found in any users' receipt records. 
+    - excludes the txns with the Coupon_id still missing.
 
-- **`flag_pay_void`**:
-    - `Actual_pay ≤ 0` in txns. 
+- **`flag_missing_info`**:
+    - Any fields missing in txns.
+    - Coupon_id not counted as missing if `flag_no_coupon` is 1.
 
-### The following flag(s) labeled within the `receipt` table:
+- **`flag_pay_or_reduce_amt_abn`**:
+    - `Actual_pay < 0` or `Reduce_amount < 0` in txns. 
+    - **Or** `Reduce_amount > 0` when `flag_no_coupon` is 1.
 
-- **`flag_invalid_coupon`**: The Coupon receipt either has missing info, or counterfaits with what's recorded in txns. 
-    - *Structrual Issue:* The coupon was received by the same user but its `Start_date`, `Receive_date`, or `End_date` is missing, or `Start_date > End_date`.
+### The following flags labeled within the `receipt` table:
+
+The following 4 flags `flag_struc_invalid`, `flag_cross_user`, `flag_early` and `flag_late` corresponds to 4 main types of invalid usage cases, all **serving the same purpose** of deciding whether a coupon usage is valid or not. 
+For invalid usage cases, at least one of these flags is 1.
+
+**Invalid Cases:** The Coupon receipt either has missing info (structural issue), or counterfaits with what's recorded in txns (semantic issue). 
+    - **`flag_struc_invalid`:** *Structrual Issue:* The coupon was received by the same user but its `Start_date`, `Receive_date`, or `End_date` is missing, or `Start_date > End_date`.
     - *Semantic Issue:*
-        - The coupon was redeemed by a different user. The redeemer did not receive the coupon within its valid usage window, **or**
-        - The coupon was received by the same user but redeemed before its `Start_date`, or after its `End_date`.
+        - **`flag_cross_user`** The coupon was redeemed by a different user. The redeemer did not receive the coupon within its valid usage window, **or**
+        - **`flag_early` and `flag_late`** The coupon was received by the same user but redeemed before its `Start_date`, or after its `End_date`.
     
 ## Data Quality / Integrity Metrics  
 
@@ -95,10 +104,10 @@ Flags are retained only for diagnostic purposes (not used in training).
 
 For each segment defined by `Price_limit_bin × Coupon_amt_bin × Expiry_span_bin`:  
 - Report: 
-    - **% `flag_invalid_coupon`** = (# invalid_coupon) / (# receipts).  
+    - **%`flag_struc_invalid`, `flag_cross_user`, `flag_early` and `flag_late`** = (# invalid_coupon in each type of case) / (# receipts).  
     - **redemption rate** = (# validly_redeemed_coupon) / (# receipts).
     - **repeatedly redeemed rate** = (# repeatedly_redeemed_coupon) / (# receipts)
-- **High-integrity cohort** = segments with low % `flag_invalid_coupon`, high redemption rate, and low repeatedly redeemed rate. 
+- **High-integrity cohort** = segments with low % invalid_coupon in each type of case, high redemption rate, and low repeatedly redeemed rate. 
 
 >   Note: **repeat_redemption**: 
         - each receipt contributes to only one redemption: if a (user_id, coupon_id) appears in multiple receipts, treated as different events, and each receipt event matches at most one txn in which the Pay_date covers the valid usage window.
@@ -111,22 +120,35 @@ Across all transactions, report the proportions of:
 - `coupon_id_imputed = 1`, `flag_ambiguous_txn`, and `flag_no_coupon` in txns with Coupon_id oringinally missing.
 - txns with missing Coupon_id in the raw data.  
 - `flag_untracked_coupon`.
-- `flag_pay_void`.
+- `flag_missing_info`
+- `flag_pay_or_reduce_amt_abn`.
 
 ## Supervised Learning Targets:
-Generate training labels from two perspectives: short-term and long-term.
+Generate training labels from two perspectives: 
+1. policy/audit: decide if a coupon is used in a valid way or not.
+2. redemption/ROI: further divide into two variants: short-term and full-horizon.
 
-For each **receipt**,
+### Policy/Audit:
+`label_valid`: For each **coupon receipt**, any one of the flags `flag_struc_invalid`, `flag_cross_user`, `flag_early` and `flag_late` is 1, label as 0(invalid); else 1.
+
+### Redemption/ROI:
+For each **coupon receipt**,
 - **Short-term ROI:** `label_same_user_st` (primary label): 1 if **same user** redeems within `min(15d, End_date)`; else 0.
 - **Full-horizon ROI:** `label_same_user_fh`: if **same user** redeems within `End_date`.
+
+Pick one aligning to the ROI campaign.
 
 ## Leakage Guards:
 
 - All features must satisfy `feature_ts ≤ Receive_date`.
-- Train/Val/Test **Split key** = `Receive_date`.
-- **Purge Period:** apply a 15-day gap before each Val/Test boundary so no Train label window crosses into future data.
 - Any population aggregates (e.g., redemption rate by coupon_type) must be computed within **feature lookback window only**.
-
+- Train/Val/Test **Split key** = `Receive_date`.
+- **Purge Period/Lookahead Guard:** 
+    - Right-cencsored data awareness: For receipts whose End_date go beyond the data coverage end (2023/06/30), simply drop these receipts.
+    - For validity/policy modeling, apply a label-lookahead guard ensuring all receipts have `End_date ≤ split_start_next - 1d`.
+    - For redemption/ROI modeling, apply a 15-day gap before each Val/Test boundary so no Train label window crosses into future data.
+    
+    
 ## Edge Cases/Drop Rules:
 
 - Duplicate rows in any CSV.
@@ -136,14 +158,22 @@ For each **receipt**,
 ## Entities:
 Row = one coupon receipt event for a (User_id, Coupon_id, Receive_date).
 
-## Label:
-
-Choose one of the following labels aligning to the product design:
+## Labels:
+1. **Policy:** `label_valid`
+2. **ROI:** Choose one of the following labels aligning to the product design:
 - `label_same_user_st`
 - `label_same_user_fh`
 
 ## Split:
+### Right-censored data handling:
+Drop the receipts whose End_date go beyong 2023-06-30.
 
+### Policy modeling:
+- **Split key:** `Receive_date` of coupons
+- **Split integrity:** Apply a label-lookahead guard before each of the next set's starting timestamp.
+    - `End_date ≤ split_start_next - 1d`
+
+### ROI modeling: 
 - **Split key:** `Receive_date` of coupons
 - **Split integrity:** Leave a 15-day purge before Test:  
     - Train: 2023-01-01 … 2023-05-16 (4.5 months).
