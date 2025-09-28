@@ -22,8 +22,8 @@ def diag_on_receipts(
     calculate the percentage of valid coupons and redemption rate (st & fh).
     
     Output: a panda dataframe with each row representing a segment.
-        indices: Price_limit_bin, Coupon_limit_bin, and Expiry_span_bin.
-        cols: validity percentage, the validity percentage, short-term and full horizon redemption rate.
+        indices: Price_limit_upper_bin (INTEGER), Coupon_limit_upper_bin (INTEGER), and Expiry_upper_bin (INTERVAL).
+        cols: number of receipts within each bin, the validity percentage, short-term and full horizon redemption rate.
     """
     con = duckdb.connect()
     con.execute(f"PRAGMA threads={threads}")
@@ -36,11 +36,7 @@ def diag_on_receipts(
             SELECT 
                 Price_limit_cent AS Price_limit,
                 Coupon_amt_cent AS Coupon_limit,
-                CASE 
-                    WHEN Start_date IS NOT NULL AND End_date IS NOT NULL AND End_date >= Start_date
-                    THEN End_date - Start_date 
-                    ELSE NULL 
-                END AS Expiry_span,
+                Start_date, End_date,
                 label_valid AS L_valid,
                 label_same_user_fh AS L_usage_fh,
                 label_same_user_st AS L_usage_st
@@ -50,7 +46,10 @@ def diag_on_receipts(
     # Section 2: Segmentation & Statistics
     # =======================================
     def _set_lower_upper_bounds(i: int, splits: list, 
-                                minv: int = 0, maxv: int = 100000000000000) -> tuple[int]:
+                                min_max: list = [0, 1000000000000000]
+                ):
+        minv = min_max[0]
+        maxv = min_max[1]
         if i != 0:
             lower = splits[i - 1]
         else:
@@ -59,11 +58,11 @@ def diag_on_receipts(
             upper = splits[i]
         else:
             upper = maxv
-        return (lower, upper)
+        return lower, upper
     
     con.execute("""
-        CREATE TABLE segs (Price_limit_bin_code INTEGER, Coupon_limit_bin_code INTEGER, Expiry_span_bin_code INTEGER,
-                            validity_pc DOUBLE, redeem_fh_pc DOUBLE, redeem_st_pc DOUBLE);
+        CREATE TABLE segs (Price_limit_upper_bin INTEGER, Coupon_limit_upper_bin INTEGER, Expiry_span_upper_bin INTERVAL,
+                            validity_pc DOUBLE, redeem_fh_pc DOUBLE, redeem_st_pc DOUBLE, receipts_count INTEGER);
     """)
 
     for i in range(len(Price_limit_bin_splits) + 1):
@@ -73,22 +72,24 @@ def diag_on_receipts(
             Coupon_limit_lower, Coupon_limit_upper = _set_lower_upper_bounds(j, Coupon_limit_bin_splits)
             
             for k in range(len(Expiry_span_bin_splits) + 1):
-                Expiry_span_lower, Expiry_span_upper = _set_lower_upper_bounds(k, Expiry_span_bin_splits, maxv=365)
-                
+                Expiry_span_lower, Expiry_span_upper = _set_lower_upper_bounds(k, Expiry_span_bin_splits, min_max=[0, 365])
+            
                 con.execute(f"""
                     CREATE OR REPLACE TABLE seg AS
                         SELECT
-                            {i} AS Price_limit_bin_code,
-                            {j} AS Coupon_limit_bin_code,
-                            {k} AS Expiry_span_bin_code,
+                            MAX(Price_limit) AS Price_limit_upper_bin,
+                            MAX(Coupon_limit) AS Coupon_limit_upper_bin,
+                            MAX(End_date - Start_date) AS Expiry_span_upper_bin,
                             ROUND(SUM(L_valid) / COUNT(*) * 100, 2) AS validity_pc,
                             ROUND(SUM(L_usage_fh) / COUNT(*) * 100, 2) AS redeem_fh_pc,
-                            ROUND(SUM(L_usage_st) / COUNT(*) * 100, 2) AS redeem_st_pc
+                            ROUND(SUM(L_usage_st) / COUNT(*) * 100, 2) AS redeem_st_pc,
+                            COUNT(*) AS receipts_count
                         FROM receipts
                         WHERE
-                            Price_limit BETWEEN {Price_limit_lower} AND {Price_limit_upper}
-                            Coupon_limit BETWEEN {Coupon_limit_lower} AND {Coupon_limit_upper}
-                            Expiry_span BETWEEN {Expiry_span_lower} AND {Expiry_span_upper}
+                            (Price_limit BETWEEN {Price_limit_lower} AND {Price_limit_upper}) AND
+                            (Coupon_limit BETWEEN {Coupon_limit_lower} AND {Coupon_limit_upper}) AND
+                            (End_date BETWEEN (Start_date + INTERVAL {Expiry_span_lower} DAY) 
+                                        AND (Start_date + INTERVAL {Expiry_span_upper} DAY))
                 """)
 
                 con.execute("""

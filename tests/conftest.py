@@ -51,6 +51,31 @@ def make_receipts(make_receipt):
     return _make_receipts
 
 @pytest.fixture
+def make_labelled_receipt():
+    def _make_labelled_receipt(user, coupon, coupon_amt_cent, price_limit_cent, 
+                               receive_date, start_date, end_date, 
+                               label_valid, label_fh_redeem, label_st_redeem):
+        return pd.DataFrame([{
+            "User_id_code": user,
+            "Coupon_id_code": coupon,
+            "Coupon_amt_cent": coupon_amt_cent,
+            "Price_limit_cent": price_limit_cent,
+            "Receive_date": pd.Timestamp(receive_date),
+            "Start_date": pd.Timestamp(start_date),
+            "End_date": pd.Timestamp(end_date),
+            "label_valid": label_valid,
+            "label_same_user_fh": label_fh_redeem,
+            "label_same_user_st": label_st_redeem
+        }])
+    return _make_labelled_receipt
+
+@pytest.fixture
+def make_labelled_receipts(make_labelled_receipt):
+    def _make_labelled_receipts(*rows):
+        return pd.concat([make_labelled_receipt(*row) for row in rows], ignore_index=True)
+    return _make_labelled_receipts
+
+@pytest.fixture
 def add_txn_key():
     def _add_txn_key(txn_df, key=1):
         txn_df = txn_df.assign(txn_key = key)
@@ -80,16 +105,21 @@ def add_receipt_keys():
 
 @pytest.fixture
 def cast_datatype():
+    """Note: cast_datatype is used until key(s) is/are added."""
     def _cast_datetype(df, flag):
         if flag == "txn":
-            to_Int_cols = ["User_id_code", "Shop_id_code", 
+            to_Int_cols = ["txn_key", "User_id_code", "Shop_id_code", 
                               "Coupon_id_code",
                               "Order_id_code", "Coupon_type",
                               "Actual_pay_cent", "Reduce_amount_cent"]
         elif flag == "receipt":
-            to_Int_cols = ["User_id_code", "Coupon_id_code",
+            to_Int_cols = ["receipt_key", "User_id_code", "Coupon_id_code",
                            "Coupon_amt_cent", "Price_limit_cent",
                            "Coupon_status"]
+        elif flag == "receipt_labelled":
+            to_Int_cols = ["receipt_key", "User_id_code", "Coupon_id_code",
+                           "Coupon_amt_cent", "Price_limit_cent",
+                           "label_valid", "label_same_user_fh", "label_same_user_st"]
         for col in to_Int_cols:
             df[col] = df[col].astype("Int64")
         return df

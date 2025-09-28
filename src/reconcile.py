@@ -3,6 +3,29 @@
 
 import pandas as pd
 
+def add_keys(txns_df: pd.DataFrame, receipts_df: pd.DataFrame):
+    """
+    Add stable keys to transaction and receipt tables before reconciliation.
+
+    - txn_key: original index of txn_df (after cleaning/deduplication).
+    - receipt_key: original index of receipts_df.
+    """
+
+    # Defensive copy to avoid mutating caller’s frames
+    txns_df = txns_df.copy()
+    receipts_df = receipts_df.copy()
+
+    # Ensure indexes are unique and stable
+    if not txns_df.index.is_unique:
+        raise ValueError("Transaction DataFrame index is not unique — check deduplication in clean_normalize.py")
+    if not receipts_df.index.is_unique:
+        raise ValueError("Receipt DataFrame index is not unique — check deduplication in clean_normalize.py")
+
+    txns_df["txn_key"] = txns_df.index
+    receipts_df["receipt_key"] = receipts_df.index
+
+    return txns_df, receipts_df
+
 # public
 def impute_missing_coupon_ids(txns_df, receipts_df, 
                               txns_out_pq="data_work/txn_reconciled.parquet",
@@ -15,7 +38,7 @@ def impute_missing_coupon_ids(txns_df, receipts_df,
     """
 
     # add stable keys
-    txns_df, receipts_df = _add_keys(txns_df, receipts_df)
+    txns_df, receipts_df = add_keys(txns_df, receipts_df)
 
     # filter to txns with missing Coupon_id_code
     txn_missing_mask = txns_df["Coupon_id_code"] == -1
@@ -63,31 +86,6 @@ def impute_missing_coupon_ids(txns_df, receipts_df,
 
 #################################################################################################
 ### internal helpers for the public function `impute_missing_coupon_ids(txns_df, receipts_df)`
-
-def _add_keys(txns_df: pd.DataFrame, receipts_df: pd.DataFrame):
-    """
-    Add stable keys to transaction and receipt tables before reconciliation.
-
-    - txn_key: original index of txn_df (after cleaning/deduplication).
-    - receipt_key: original index of receipts_df.
-    """
-
-    # Defensive copy to avoid mutating caller’s frames
-    txns_df = txns_df.copy()
-    receipts_df = receipts_df.copy()
-
-    # Ensure indexes are unique and stable
-    if not txns_df.index.is_unique:
-        raise ValueError("Transaction DataFrame index is not unique — check deduplication in clean_normalize.py")
-    if not receipts_df.index.is_unique:
-        raise ValueError("Receipt DataFrame index is not unique — check deduplication in clean_normalize.py")
-
-    txns_df["txn_key"] = txns_df.index
-    receipts_df["receipt_key"] = receipts_df.index
-
-    return txns_df, receipts_df
-
-
 def _prep_receipts_for_matching(receipts_df):
     """Add start_eff := max(Receive_date, Start_date). 
     Drop rows with missing dates or Start_date > End_date."""
