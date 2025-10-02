@@ -8,7 +8,7 @@ from pathlib import Path
 @pytest.fixture
 def make_txn():
     def _make_txn(user, coupon, pay_date, pay_amt_cent, reduce_amt_cent, 
-                  shop=1, order=1, biz_code='A', coupon_type=1):
+                  order=1, shop=1, biz_code='A', coupon_type=1):
         return pd.DataFrame([{
             "User_id_code": user,
             "Shop_id_code": shop,
@@ -76,6 +76,21 @@ def make_labelled_receipts(make_labelled_receipt):
     return _make_labelled_receipts
 
 @pytest.fixture
+def make_visit():
+    def _make_visit(user, visit_date):
+        return pd.DataFrame([{
+            "User_id_code": user,
+            "Visit_date": pd.Timestamp(visit_date)
+        }])
+    return _make_visit
+
+@pytest.fixture
+def make_visits(make_visit):
+    def _make_visits(*rows):
+        return pd.concat([make_visit(*row) for row in rows], ignore_index=True)
+    return _make_visits
+
+@pytest.fixture
 def add_txn_key():
     def _add_txn_key(txn_df, key=1):
         txn_df = txn_df.assign(txn_key = key)
@@ -112,6 +127,11 @@ def cast_datatype():
                               "Coupon_id_code",
                               "Order_id_code", "Coupon_type",
                               "Actual_pay_cent", "Reduce_amount_cent"]
+        elif flag == "txn_wo_key":
+            to_Int_cols = ["User_id_code", "Shop_id_code", 
+                              "Coupon_id_code",
+                              "Order_id_code", "Coupon_type",
+                              "Actual_pay_cent", "Reduce_amount_cent"]
         elif flag == "receipt":
             to_Int_cols = ["receipt_key", "User_id_code", "Coupon_id_code",
                            "Coupon_amt_cent", "Price_limit_cent",
@@ -120,6 +140,9 @@ def cast_datatype():
             to_Int_cols = ["receipt_key", "User_id_code", "Coupon_id_code",
                            "Coupon_amt_cent", "Price_limit_cent",
                            "label_valid", "label_same_user_fh", "label_same_user_st"]
+        elif flag == "visit":
+            to_Int_cols = ["User_id_code"]
+            
         for col in to_Int_cols:
             df[col] = df[col].astype("Int64")
         return df

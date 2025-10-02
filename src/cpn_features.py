@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 from datetime import date
 import datetime
-from datetime import date
 
 holidays = [date(2023, 1, 1), date(2023, 1, 2), 
            date(2023, 1, 21), date(2023, 1, 22), date(2023, 1, 23), date(2023, 1, 24), date(2023, 1, 25), date(2023, 1, 26), date(2023, 1, 27),
@@ -25,7 +24,7 @@ workdays = [date(2023, 1, 28), date(2023, 1, 29), date(2023, 4, 23), date(2023, 
 def coupon_features(
         receipts_labelled_parquet: Path,
         out_parquet: Path,
-        lookback_days: list[int] = [7, 14, 30],
+        lookback_days: list[int] = [8, 15, 31],
         Price_limit_bin_splits: list[int] = [1000, 10000], # only 2 splits allowed; in units of cents
         Coupon_limit_bin_splits: list[int] = [1000, 10000], # only 2 splits allowed; in units of cents
         Expiry_span_bin_split: int = 10, # only 1 split allowed; in units of days
