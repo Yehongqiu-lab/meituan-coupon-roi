@@ -166,7 +166,7 @@ Row = one coupon receipt event for a (User_id, Coupon_id, Receive_date).
 
 ## Split:
 ### Right-censored data handling:
-Drop the receipts whose End_date go beyong 2023-06-30.
+Drop the receipts whose End_date go beyond 2023-06-30.
 
 ### Policy modeling:
 - **Split key:** `Receive_date` of coupons

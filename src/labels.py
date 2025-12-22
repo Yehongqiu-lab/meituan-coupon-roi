@@ -142,6 +142,7 @@ def build_labels(
     # =====================================
 
     # table: first_valid
+    ## this is not necessary as we are guessing what is the truth now:
     con.execute("""
         CREATE OR REPLACE TABLE first_valid AS
         SELECT receipt_key,
@@ -163,6 +164,11 @@ def build_labels(
           SELECT receipt_key, COUNT(*) AS same_user_valid_txn_count
           FROM cand_fh GROUP BY receipt_key
         ),
+                
+        --- assume the coupons with the same coupon_id have the same start & end time
+        --- one txn might be matched to multiple receipt events with the same coupon_id
+        --- for each receipt event, if the pay date is before the coupon start date, it is always invalid.
+                      
         early_1 AS (
           SELECT r.receipt_key, COUNT(*) AS same_user_early_txn_count_1
           FROM r
@@ -170,6 +176,11 @@ def build_labels(
           WHERE r.Start_date IS NOT NULL AND t.Pay_date < r.Start_date
           GROUP BY r.receipt_key
         ),
+        
+        --- multiple txns might be matched to the same receipt event (defined by receipt_key)
+        --- if the lastest txn happens before the receive date, the receipt event is invalid.
+        --- the gist behind is when receive date is later than start date, there should be at least one txn happens after the receive date.       
+        
         early_2 AS (
           SELECT r.receipt_key, COUNT(*) AS same_user_early_txn_count_2
           FROM r
@@ -180,6 +191,7 @@ def build_labels(
           GROUP BY r.receipt_key
           HAVING MAX(t.Pay_date) < r.Receive_date  
         ),
+                
         late AS (
           SELECT r.receipt_key, COUNT(*) AS same_user_late_txn_count
           FROM r
@@ -187,6 +199,9 @@ def build_labels(
           WHERE r.end_eff IS NOT NULL AND t.Pay_date > r.end_eff
           GROUP BY r.receipt_key
         ),
+                
+        --- for each receipt event, find the txns of other users using the same coupon (same id) within the valid usage window
+       
         otheru AS (
           SELECT r.receipt_key, COUNT(*) AS other_user_in_window_txn_count
           FROM r
@@ -196,6 +211,7 @@ def build_labels(
                       AND t.Pay_date BETWEEN r.start_eff AND r.end_eff
           GROUP BY r.receipt_key
         )
+    
         SELECT r.receipt_key,
                COALESCE(inwin.same_user_valid_txn_count, 0) AS same_user_valid_txn_count,
                COALESCE(early_1.same_user_early_txn_count_1, 0) AS same_user_early_txn_count_1,
@@ -242,7 +258,7 @@ def build_labels(
                     AND r2.r_coupon = o.coupon_id
                     AND r2.start_eff IS NOT NULL AND r2.end_eff IS NOT NULL
                     AND o.Pay_date BETWEEN r2.start_eff AND r2.end_eff
-                WHERE r2.receipt_key IS NULL
+                WHERE r2.receipt_key IS NULL   --- the key part: no receipt event is matched
                 """)
     
     # table: other_user_wo_own_receipt_txn_counts
@@ -331,7 +347,7 @@ def build_labels(
           FR.flag_cross_user,
           CASE WHEN ((L.User_id_code IS NULL OR L.User_id_code = -1) OR
                      (L.Coupon_id_code IS NULL OR  L.Coupon_id_code = -1) OR
-                     L.Start_date IS NULL OR L.Receive_date IS NULL OR 
+                     L.Start_date IS NULL OR L.Receive_date IS NULL OR ---any missing fields lead to struc_invalid flag being 1. 
                      L.End_date IS NULL OR L.Start_date > L.End_date)
                 THEN 1 ELSE 0 END AS flag_struc_invalid
         FROM labels L

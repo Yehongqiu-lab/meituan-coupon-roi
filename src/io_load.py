@@ -85,12 +85,12 @@ def save_df2pq(df, name):
                 index=False)
     print(f"[{name}] saved to {path}, shape={df.shape}, size={os.path.getsize(path)/1024**2:.2f} MB")
 
-def load_df_from_pq(path, cols="all") -> pd.DataFrame:
+def load_df_from_pq(path, cols="all", **kargs) -> pd.DataFrame:
     repo_root = get_repo_root()
     path = os.path.join(repo_root, path)
     if cols != "all":
-        df = pd.read_parquet(path, engine="pyarrow", columns=cols)
+        df = pd.read_parquet(path, engine="pyarrow", columns=cols, **kargs)
     else:
-        df = pd.read_parquet(path, engine="pyarrow")
+        df = pd.read_parquet(path, engine="pyarrow", **kargs)
     print(f"pq loaded from {path}, shape={df.shape}, size={os.path.getsize(path)/1024**2:.2f} MB")
     return df

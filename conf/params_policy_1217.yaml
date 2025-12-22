@@ -1,0 +1,9 @@
+bagging_fraction: 0.8
+bagging_freq: 5
+boosting_type: gbdt
+feature_fraction: 0.9
+learning_rate: 0.05
+metric: binary_logloss
+num_leaves: 31
+objective: binary
+verbose: 0

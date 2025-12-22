@@ -90,7 +90,7 @@ def user_features(
             FROM daily
             WINDOW same_user AS (
                 PARTITION BY User_id_code
-                ORDER BY Receive_date
+                ORDER BY Receive_date  ---this will put the lines with NaT receive_date to the end.
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
             )     
     """)
@@ -127,10 +127,10 @@ def user_features(
                 SELECT
                     a.receipt_key,
                     (a.no_history_indicator OR b.no_history_indicator)::INT AS no_history_indicator,
-                    (a.invalid_right - b.invalid_left)                      AS invalid_{window_len}d,
-                    (a.fh_redeem_right - b.fh_redeem_left)                  AS fh_redeem_{window_len}d,
-                    (a.st_redeem_right - b.st_redeem_left)                  AS st_redeem_{window_len}d,
-                    (a.vol_right - b.vol_left)                              As vol_{window_len}d
+                    (a.invalid_right - b.invalid_left)                      AS invalid_{window_len-1}d,
+                    (a.fh_redeem_right - b.fh_redeem_left)                  AS fh_redeem_{window_len-1}d,
+                    (a.st_redeem_right - b.st_redeem_left)                  AS st_redeem_{window_len-1}d,
+                    (a.vol_right - b.vol_left)                              As vol_{window_len-1}d
                 FROM asof_right a
                 LEFT JOIN asof_left b
                     ON a.receipt_key = b.receipt_key
@@ -139,19 +139,19 @@ def user_features(
         con.execute(f"""
             CREATE OR REPLACE TABLE receipts AS
                 SELECT r.*,
-                    bk.no_history_indicator AS no_hist_rcs_marker_{window_len}d,
+                    bk.no_history_indicator AS no_hist_rcs_marker_{window_len-1}d,
                     CASE
-                        WHEN bk.vol_{window_len}d = 0 THEN 0.000
-                        ELSE ROUND(bk.invalid_{window_len}d / bk.vol_{window_len}d, 3)
-                        END AS Rate_same_user_invalid_{window_len}d,
+                        WHEN bk.vol_{window_len-1}d = 0 THEN 0.000
+                        ELSE ROUND(bk.invalid_{window_len-1}d / bk.vol_{window_len-1}d, 3)
+                        END AS Rate_same_user_invalid_{window_len-1}d,
                     CASE
-                        WHEN bk.vol_{window_len}d = 0 THEN 0.000
-                        ELSE ROUND(bk.fh_redeem_{window_len}d / bk.vol_{window_len}d, 3)
-                        END AS Rate_same_user_fh_redeem_{window_len}d,
+                        WHEN bk.vol_{window_len-1}d = 0 THEN 0.000
+                        ELSE ROUND(bk.fh_redeem_{window_len-1}d / bk.vol_{window_len-1}d, 3)
+                        END AS Rate_same_user_fh_redeem_{window_len-1}d,
                     CASE
-                        WHEN bk.vol_{window_len}d = 0 THEN 0.000
-                        ELSE ROUND(bk.st_redeem_{window_len}d / bk.vol_{window_len}d, 3)
-                        END AS Rate_same_user_st_redeem_{window_len}d
+                        WHEN bk.vol_{window_len-1}d = 0 THEN 0.000
+                        ELSE ROUND(bk.st_redeem_{window_len-1}d / bk.vol_{window_len-1}d, 3)
+                        END AS Rate_same_user_st_redeem_{window_len-1}d
                 FROM receipts r
                 LEFT JOIN rlookback bk
                     ON r.receipt_key = bk.receipt_key
@@ -171,7 +171,7 @@ def user_features(
             WITH per_order AS (
                 SELECT
                     User_id_code, Pay_date, Order_id_code,
-                    FIRST(Actual_pay_cent)        AS Actual_pay_perorder,
+                    FIRST(Actual_pay_cent)        AS Actual_pay_perorder, --- actual pay amount is the same across observations for each txn record involving different coupons
                     SUM(Reduce_amount_cent)       AS Reduce_amt_perorder
                 FROM txns
                 GROUP BY 1,2,3
@@ -226,9 +226,9 @@ def user_features(
             CREATE OR REPLACE TABLE rlookback AS
                 SELECT a.receipt_key,
                     (a.no_hist_marker OR b.no_hist_marker)::INT AS no_hist_marker,
-                    (a.order_vol_right - b.order_vol_left)      AS order_vol_{window_len}d,
-                    (a.txn_amt_right - b.txn_amt_left)          AS txn_amt_{window_len}d,
-                    (a.reduce_amt_right - b.reduce_amt_left)    AS reduce_amt_{window_len}d
+                    (a.order_vol_right - b.order_vol_left)      AS order_vol_{window_len-1}d,
+                    (a.txn_amt_right - b.txn_amt_left)          AS txn_amt_{window_len-1}d,
+                    (a.reduce_amt_right - b.reduce_amt_left)    AS reduce_amt_{window_len-1}d
                 FROM asof_right a
                 LEFT JOIN asof_left b
                     ON a.receipt_key = b.receipt_key
@@ -236,17 +236,20 @@ def user_features(
         con.execute(f"""
             CREATE OR REPLACE TABLE receipts AS
                 SELECT r.*,
-                    bk.no_hist_marker AS no_hist_txns_marker_{window_len}d,
+                    bk.no_hist_marker AS no_hist_txns_marker_{window_len-1}d,
+
+                    ---avgspend does not include reduced amt here.
                     CASE
-                        WHEN bk.order_vol_{window_len}d = 0 THEN 0.000
-                        ELSE ROUND(bk.txn_amt_{window_len}d / bk.order_vol_{window_len}d / (r.Price_limit_cent + 1), 3) 
-                        END AS Rt_avgspend_vs_pricelimit_{window_len}d,
+                        WHEN bk.order_vol_{window_len-1}d = 0 THEN 0.000
+                        ELSE ROUND(bk.txn_amt_{window_len-1}d / bk.order_vol_{window_len-1}d / (r.Price_limit_cent + 1), 3) 
+                        END AS Rt_avgspend_vs_pricelimit_{window_len-1}d,
+                    
                     CASE
-                        WHEN bk.order_vol_{window_len}d = 0 THEN 0.000
-                        ELSE ROUND(bk.reduce_amt_{window_len}d / bk.order_vol_{window_len}d / (r.Coupon_amt_cent + 1), 3)
-                        END AS Rt_avgreduce_vs_couponamt_{window_len}d,
-                    ROUND(bk.order_vol_{window_len}d / ({window_len} - 1), 3)
-                        AS Freq_purchase_{window_len}d
+                        WHEN bk.order_vol_{window_len-1}d = 0 THEN 0.000
+                        ELSE ROUND(bk.reduce_amt_{window_len-1}d / bk.order_vol_{window_len-1}d / (r.Coupon_amt_cent + 1), 3)
+                        END AS Rt_avgreduce_vs_couponamt_{window_len-1}d,
+                    ROUND(bk.order_vol_{window_len-1}d / {window_len-1}, 3)
+                        AS Freq_purchase_{window_len-1}d
                 FROM receipts r
                 LEFT JOIN rlookback bk
                     ON r.receipt_key = bk.receipt_key
@@ -300,7 +303,7 @@ def user_features(
             CREATE OR REPLACE TABLE rlookback AS
                 SELECT a.receipt_key,
                     (a.no_hist_marker OR b.no_hist_marker)::INT AS no_hist_marker,
-                    (a.visit_tms_right - b.visit_tms_left) AS visit_tms_{window_len}d
+                    (a.visit_tms_right - b.visit_tms_left) AS visit_tms_{window_len-1}d
                 FROM asof_right a
                 LEFT JOIN asof_left b
                     ON a.receipt_key = b.receipt_key
@@ -308,9 +311,9 @@ def user_features(
         con.execute(f"""
             CREATE OR REPLACE TABLE receipts AS
                 SELECT r.*,
-                    bk.no_hist_marker AS no_hist_visits_marker_{window_len}d,
-                    ROUND(bk.visit_tms_{window_len}d / ({window_len} - 1), 3)
-                        AS Freq_visit_{window_len}d
+                    bk.no_hist_marker AS no_hist_visits_marker_{window_len-1}d,
+                    ROUND(bk.visit_tms_{window_len-1}d / {window_len-1}, 3)
+                        AS Freq_visit_{window_len-1}d
                 FROM receipts r
                 LEFT JOIN rlookback bk
                     ON r.receipt_key = bk.receipt_key

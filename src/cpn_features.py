@@ -150,7 +150,7 @@ def coupon_features(
             FROM daily
             WINDOW same_seg AS (
                 PARTITION BY Price_limit_bin, Coupon_limit_bin, Expiry_span_bin
-                ORDER BY Receive_date
+                ORDER BY Receive_date            ---DuckDB puts the lines with NaT value to the end 
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW 
             )
     """)
@@ -192,10 +192,10 @@ def coupon_features(
             SELECT
                 a.receipt_key, a.Receive_date,
                 (a.no_history_indicator OR b.no_history_indicator)::INT AS no_history_indicator,
-                (a.invalid_right - b.invalid_left) AS invalid_{window_len}d,
-                (a.fh_right - b.fh_left) AS fh_{window_len}d,
-                (a.st_right - b.st_left) AS st_{window_len}d,
-                (a.all_right - b.all_left) AS row_count_{window_len}d
+                (a.invalid_right - b.invalid_left) AS invalid_{window_len-1}d,
+                (a.fh_right - b.fh_left) AS fh_{window_len-1}d,
+                (a.st_right - b.st_left) AS st_{window_len-1}d,
+                (a.all_right - b.all_left) AS row_count_{window_len-1}d
             FROM asof_right a
             LEFT JOIN asof_left b
                 ON a.receipt_key = b.receipt_key
@@ -204,19 +204,19 @@ def coupon_features(
         con.execute(f"""
             CREATE OR REPLACE TABLE receipts_4 AS
             SELECT r.*, 
-                bk.no_history_indicator AS no_history_indicator_{window_len}d,
+                bk.no_history_indicator AS no_history_indicator_{window_len-1}d,
                 CASE 
-                    WHEN bk.row_count_{window_len}d = 0 THEN 0.000 
-                    ELSE ROUND(bk.invalid_{window_len}d / bk.row_count_{window_len}d, 3) 
-                        END AS Rate_invalid_{window_len}d,
+                    WHEN bk.row_count_{window_len-1}d = 0 THEN 0.000 
+                    ELSE ROUND(bk.invalid_{window_len-1}d / bk.row_count_{window_len-1}d, 3) 
+                        END AS Rate_invalid_{window_len-1}d,
                 CASE
-                    WHEN bk.row_count_{window_len}d = 0 THEN 0.000
-                    ELSE ROUND(bk.fh_{window_len}d / bk.row_count_{window_len}d, 3)
-                        END AS Rate_fh_redeem_{window_len}d,
+                    WHEN bk.row_count_{window_len-1}d = 0 THEN 0.000
+                    ELSE ROUND(bk.fh_{window_len-1}d / bk.row_count_{window_len-1}d, 3)
+                        END AS Rate_fh_redeem_{window_len-1}d,
                 CASE
-                    WHEN bk.row_count_{window_len}d = 0 THEN 0.000
-                    ELSE ROUND(bk.st_{window_len}d / bk.row_count_{window_len}d, 3)
-                        END AS Rate_st_redeem_{window_len}d
+                    WHEN bk.row_count_{window_len-1}d = 0 THEN 0.000
+                    ELSE ROUND(bk.st_{window_len-1}d / bk.row_count_{window_len-1}d, 3)
+                        END AS Rate_st_redeem_{window_len-1}d
             FROM receipts_4 r
             LEFT JOIN rlookback bk
                 ON r.receipt_key = bk.receipt_key 
