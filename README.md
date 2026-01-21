@@ -27,3 +27,6 @@ https://pickled-diploma-981.notion.site/An-EDA-into-the-conversion-funnel-datase
 
 ## ML Experimenting Log
 https://pickled-diploma-981.notion.site/Model-Files-name-and-Model-performance-notes-2dd1629ab9d3807ebe58df5d46d936d6
+
+## Experiment Results
+Google drive: https://drive.google.com/drive/folders/1vMA0_mzRmYBi-MYBlOL0qtCs2KZvwaT7?usp=sharing
