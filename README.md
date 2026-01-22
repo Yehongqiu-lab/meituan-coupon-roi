@@ -22,10 +22,10 @@ By distributing only the coupons predicted as `>0.5` for their potential redempt
 
 优惠券平均转化利润由 1.3 元提升到 2.5+ 元，预测排名前 5% 的优惠券领取率高达 20%+。
 
-## Intial BI Report
+## Initial BI Report
 https://pickled-diploma-981.notion.site/An-EDA-into-the-conversion-funnel-datasets-of-an-e-commerce-platform-Meituan-1ff1629ab9d3800d9d10cc015e193bee?pvs=74
 
-## ML Experimenting Log
+## ML Experiment Log
 https://pickled-diploma-981.notion.site/Model-Files-name-and-Model-performance-notes-2dd1629ab9d3807ebe58df5d46d936d6
 
 ## Experiment Results
