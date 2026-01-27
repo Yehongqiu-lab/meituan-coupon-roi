@@ -20,7 +20,7 @@ The project uses Git for code version control. Model training pipelines are stan
 ### Business Value 商业价值
 By distributing only the coupons predicted as `>0.5` for their potential redemption rate, the margin of each coupon increases to `>2.5￥` from `1.3￥`, and the coupons with the highest 5% redemption rate prediction score striking an actual redemption rate of `>20%`.
 
-优惠券平均转化利润由 1.3 元提升到 2.5+ 元，预测排名前 5% 的优惠券领取率高达 20%+。
+利用机器学习模型的预测结果投放优惠券，使得优惠券平均转化利润由 1.3 元提升到 2.5+ 元，预测排名前 5% 的优惠券领取率高达 20%+，优惠券单位效益显著提高。
 
 ## Initial BI Report
 https://pickled-diploma-981.notion.site/An-EDA-into-the-conversion-funnel-datasets-of-an-e-commerce-platform-Meituan-1ff1629ab9d3800d9d10cc015e193bee?pvs=74
