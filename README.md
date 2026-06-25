@@ -5,7 +5,7 @@ Improve Marketing ROI in coupons: An end-to-end data science product for a e-com
 The project is from the 2025 Business Intelligence Competition hosted by Gou Xiong Hui and Meituan. Meituan is a China-based O2O e-commerce platform. The project data is ~1G+ Meituan de-sensitized user daily activity data from Jan. 2023 to Jul. 2023.
 The platform distributed over `13M` coupons within the winter-spring seasons in 2023, while only `600K` were redeemed and converted to actual profits, with the redemption rate `<5%`. The key question is how to improve the coupon redemption rate, as well as the margin each coupon brings in to the platform.
 
-项目来源为2025 年狗熊会大学生商业分析大赛；数据为 1G+ 美团平台 2023 上半年用户日活数据。平台半年累计发放近 13M 优惠券，仅 600K 被领取使用，转化率不足 5%。海量发放优惠券不仅低效，还降低用户体验。
+项目来源为 2025 年狗熊会大学生商业分析大赛；数据为 1G+ 美团平台 2023 上半年用户日活数据。平台半年累计发放近 13M 优惠券，仅 600K 被领取使用，转化率不足 5%。海量发放优惠券不仅低效，还降低用户体验。
 
 ### Research Method and Goal 研究方法和项目目标
 The project aims to train machine learning models to predict the odds of each user redeeming differet types of coupons given their previous activity behaviours. With machine learning models, we can predict more accurately on the potential value of coupons and distribute individualized coupons.
@@ -23,7 +23,7 @@ By distributing only the coupons predicted as `>0.5` for their potential redempt
 利用机器学习模型的预测结果投放优惠券，使得优惠券平均转化利润由 1.3 元提升到 2.5+ 元，预测排名前 5% 的优惠券领取率高达 20%+，优惠券单位效益显著提高。
 
 ## 参赛作品原稿
-见代码仓库内 `2024狗熊会美团商业分析大赛_邱叶红_搭建数据驱动的优惠券精准投放系统.pdf`.
+见代码仓库内 `2025狗熊会美团商业分析大赛_邱叶红_搭建数据驱动的优惠券精准投放系统.pdf`.
 
 ## 项目复盘：BI Report
 https://pickled-diploma-981.notion.site/An-EDA-into-the-conversion-funnel-datasets-of-an-e-commerce-platform-Meituan-1ff1629ab9d3800d9d10cc015e193bee?pvs=74
